@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Magnifying glass</title>
+  <style>
+    body {
+      color: rgb(56, 56, 56)
+    }
+    
+    .hidden {
+      display: none;
+    }
+    
+    .intro,
+    .intro button {
+      color: rgb(200, 200, 200);
+    }
+
+    .intro.no-image,
+    .intro.no-image button {
+      color: rgb(56, 56, 56);
+    }
+
+    .intro {
+      padding-bottom: 10px;
+    }
+    .intro.no-image {
+      padding: 200px;
+      text-align: center;
+      border: 2px dashed rgba(0, 0, 0, 0.5);
+    }
+    
+    .file-picker {
+      margin: 10px;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+ <div class="intro no-image">
+ <p>Drag an image file from your filesystem anywhere in this window, or <button id="activateFilePicker">choose one with the filepicker</button></p>
+ <input type="file" id="filePicker" class="file-picker hidden">
+ <p>(Experimental: or you could try dragging an image onto here from another browser window, partial support only in Chrome at the moment, working on expanding that.)</p>
+ </div>
+  <script>
+    (function (window, document, undefined) {
+      "use strict";
+      var canvas = document.createElement('canvas'),
+        context = canvas.getContext('2d'),
+        offscreenCanvas = document.createElement('canvas'),
+        offscreenContext = offscreenCanvas.getContext('2d'),
+        CANVAS_WIDTH = 800,
+        CANVAS_HEIGHT = 600,
+        GLASS_EDGE_WIDTH = 10,
+        glassRadius = 100,
+        glassPosn = {},
+        scale = 2,
+        image = new Image(),
+//        defaultImagePath = 'butterfly.jpg',
+        defaultImagePath = '',
+          
+        // utility methods
+        windowToCanvas = function windowToCanvas (e) {
+          var box = canvas.getBoundingClientRect(),
+            // assumes no scaling
+            x = e.clientX - box.left,
+            y = e.clientY - box.top;
+          return {x: x, y: y};
+        },
+          
+        forEach = Array.prototype.forEach,
+        
+        // event handlers
+        cancelEvent = function cancelEvent(e) {
+          e.preventDefault();
+          e.stopPropagation();
+        },
+          
+        imageLoadedHandler = function imageLoadedHandler() {
+          // blank the canvas before drawing onto it
+          offscreenContext.clearRect(0, 0, offscreenContext.canvas.width,
+                                   offscreenContext.canvas.height);
+          offscreenContext.drawImage(image, 0, 0, 
+                                     offscreenContext.canvas.width,
+                                     offscreenContext.canvas.height);
+          context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+          context.drawImage(offscreenCanvas, 0, 0,
+                                     context.canvas.width,
+                                     context.canvas.height);
+          if (!document.querySelector('#controls')) {
+            buildControls();
+          }
+          document.querySelector('.intro').classList.remove('no-image');
+          
+          // intent is to restore() on mouseout to enable initial image to be restored.
+          context.save()
+        },
+        
+        changeScale = function changeScale() {
+          var scaleReporter = document.querySelector('#scaleReporter'),
+            scaleControl = document.querySelector('#scale'),
+            newScale = scaleControl.value;
+          scale = newScale;
+          scaleReporter.innerHTML = newScale;
+        },
+
+        changeSize = function changeSize() {
+          var sizeReporter = document.querySelector('#sizeReporter'),
+            sizeControl = document.querySelector('#glassSize');
+          glassRadius = sizeControl.value;
+          drawGlass(context);
+          sizeReporter.innerHTML = glassRadius;
+        },
+          
+        moveGlass = function moveGlass(e) {
+          if (e) {
+            glassPosn = windowToCanvas(e);
+          }
+          drawGlass(context);
+        },
+          
+        handleDrop = function handleDrop(e) {
+          var file,
+            transferItems,
+            reader = new FileReader();
+          e.preventDefault();
+          e.stopPropagation();
+          
+          file = e.dataTransfer.files[0];
+          if (file) {
+            reader.onload = function (e) {
+              image.src = e.target.result;
+            }
+            reader.readAsDataURL(file);
+          }
+          
+          // if the image was dragged from a browser, determine its url
+          // TODO: Try to make work in more than just Chrome.
+          transferItems = e.dataTransfer.items || [];
+          forEach.call(transferItems, function (item) {
+            var regex = /^.*src="([^"]+)".*$/,
+              regexResult = null;
+            if (item.type === 'text/html') {
+              item.getAsString(function (item) {
+                // Expecting string of the format:
+                // <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"><img src="[URL]" alt="some_text">
+                regexResult = regex.exec(item);
+                if (regexResult) {
+                  image.src = regexResult[1];
+                }
+              });
+            }
+          });
+        },
+          
+        activateFilePicker = function activateFilePicker(e) {
+          document.querySelector('#filePicker').classList.remove('hidden');
+        },
+          
+        pickFile = function (e) {
+          var file = e.target.files[0],
+            reader = new FileReader();
+          
+          reader.onload = function (e) {
+            image.src = e.target.result;
+            document.querySelector('#filePicker').classList.add('hidden');
+          };
+          reader.readAsDataURL(file);
+        },
+        
+          
+        // magnifying glass functions
+        repairBackground = function repairBackground (context) {
+          context.save();
+          context.translate(-glassPosn.x, -glassPosn.y);
+          context.drawImage(offscreenCanvas, 0, 0);
+          context.restore();
+        },
+             
+        updateGlassContent = function updateGlassContent(context) {
+          context.drawImage(offscreenCanvas, glassPosn.x-glassRadius/scale, glassPosn.y-glassRadius/scale,
+                            glassRadius*2/scale, glassRadius*2/scale, 
+                            glassPosn.x-glassRadius, glassPosn.y-glassRadius, 
+                            glassRadius*2, glassRadius*2);
+},
+        
+        updateGlassPosn = function updateGlassPosn(context) {
+          context.save();
+          context.beginPath();
+          context.translate(glassPosn.x, glassPosn.y);
+          repairBackground(context);
+          context.arc(0, 0, glassRadius, 0, Math.PI*2, false);
+          context.closePath();
+          drawGlassFrame();
+          context.restore();
+          context.clip();
+        },
+        
+        drawGlassFrame = function drawGlassFrame() {
+          context.strokeStyle = '#fff';
+          context.lineWidth = GLASS_EDGE_WIDTH;
+          context.stroke();          
+        },
+          
+        drawGlass = function drawGlass() {
+          context.save();
+          updateGlassPosn(context);
+          updateGlassContent(context);
+          context.restore();
+        },
+        
+          
+        // Controls  
+        buildGenericRangeControl = function buildGenericRangeControl(label, id, value, min, max, step) {
+          var slider = document.createElement('input'),
+            labelEl,
+            wrapper;
+          slider.setAttribute('type', 'range');
+          if (id) {
+            slider.setAttribute('id', id);
+          }
+          if (value) {
+            slider.setAttribute('value', value);
+          }
+          if (min) {
+            slider.setAttribute('min', min);
+          }
+          if (max) {
+            slider.setAttribute('max', max);
+          }
+          if (step) {
+            slider.setAttribute('step', step);
+          }
+          if (label) {
+            wrapper = document.createElement('span');
+            labelEl = document.createElement('label');
+            labelEl.innerHTML = label;
+            labelEl.setAttribute('for', id);
+            wrapper.appendChild(labelEl);
+            wrapper.appendChild(slider);
+            return wrapper;
+          }
+          return slider;
+        },
+              
+        addScaleControl = function addScaleControl(wrapper) {
+          var scaler = buildGenericRangeControl('Scale', 'scale', scale, '1', '5', '0.5'),
+            output = document.createElement('output');
+          output.setAttribute('id', 'scaleReporter');
+          wrapper.appendChild(scaler);
+          scaler.addEventListener('change', changeScale, false);
+          output.innerHTML = wrapper.querySelector('#scale').getAttribute('value');
+          output.style.paddingRight = '20px';
+          wrapper.appendChild(output);
+          return wrapper;
+        },
+          
+        addSizeControl = function addSizeControl(wrapper) {
+          var sizer = buildGenericRangeControl('Size', 'glassSize', glassRadius, '30', '300'),
+            output = document.createElement('output');
+          output.setAttribute('id', 'sizeReporter');
+          wrapper.appendChild(sizer);
+          sizer.addEventListener('change', changeSize, false);
+          output.innerHTML = wrapper.querySelector('#glassSize').getAttribute('value');
+          wrapper.appendChild(output);
+          return wrapper;
+        },
+        
+        buildControls = function () {
+          var controlsWrapper = document.createElement('div');
+          controlsWrapper.setAttribute('id','controls');
+          addScaleControl(controlsWrapper);
+          addSizeControl(controlsWrapper);
+          document.querySelector('body').insertBefore(controlsWrapper, canvas);
+        };
+          
+      
+      // Initialisation
+      canvas.width = CANVAS_WIDTH;
+      canvas.height = CANVAS_HEIGHT;
+      offscreenCanvas.width = CANVAS_WIDTH;
+      offscreenCanvas.height = CANVAS_HEIGHT;
+      canvas.setAttribute('id', 'shown');
+      document.querySelector('body').appendChild(canvas);
+
+      if (defaultImagePath) {
+        image.src = defaultImagePath;
+      }
+      image.addEventListener('load', imageLoadedHandler, false);
+      
+      canvas.addEventListener('mousemove', moveGlass, false);
+      canvas.addEventListener('mouseout', function () {
+        context.restore();
+        context.drawImage(offscreenCanvas, 0, 0, context.canvas.width, context.canvas.height);
+      }, false);
+      
+      // make the canvas a drop target
+      document.addEventListener('dragenter', cancelEvent, false);
+      document.addEventListener('dragover', function (e) {
+        cancelEvent(e);
+        e.dataTransfer.dropEffect = 'copy';
+      }, false);
+      document.addEventListener('drop', handleDrop, false);
+      
+      // support file picker
+      document.querySelector('#activateFilePicker').addEventListener('click', 
+                                                                     activateFilePicker,
+                                                                    false);
+      document.querySelector('#filePicker').addEventListener('change', pickFile, false);
+    }(window, window.document));
+  </script>
+</body>
+</html>
